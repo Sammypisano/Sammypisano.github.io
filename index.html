@@ -420,6 +420,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
   border:1.5px solid var(--line);border-radius:13px;color:var(--dim);font-family:inherit;font-size:13px;
   font-weight:800;padding:11px 14px;cursor:pointer;}
 .prevbar b{color:var(--accent);}
+.cpexwrap{display:flex;align-items:center;gap:8px;}
+.cpexwrap .cpexname{flex:1;min-width:0;}
+.cpexdel{flex-shrink:0;color:var(--dim2);font-size:13px;padding:4px 8px;cursor:pointer;border-radius:8px;}
+.cpexdel:active{background:rgba(255,61,119,.15);color:#ff5c7a;}
+.cpdel{color:var(--dim2);text-align:center;cursor:pointer;font-size:11px;width:26px;}
+.cpdel:active{color:#ff5c7a;}
 .histup{margin-left:auto;background:rgba(255,255,255,.05);border:1.5px solid var(--line);border-radius:11px;
   color:var(--dim);font-family:inherit;font-size:11px;font-weight:800;padding:8px 12px;cursor:pointer;}
 .lcal-cell.selday{box-shadow:inset 0 0 0 2px var(--accent);border-radius:11px;}
@@ -2170,35 +2176,90 @@ function renderCopyScreen(){
 }
 let feTimer = null;
 function renderEditTables(t){
+  const rawLines = (t||"").split(/\r?\n/);
+  const isSetLine = l => {
+    const cells = l.split(/\t+/).map(x=>x.trim()).filter(Boolean);
+    return cells.length>=2 && /^[\d.,\-]+$/.test(cells[0]) && /^[\d.,\-]+$/.test(cells[1]);
+  };
   let h = ""; let inTbl = false;
   const addBtn = '<div class="addsetlink" onclick="flowAddSet(this)">+ add set</div>';
-  (t||"").split(/\r?\n/).forEach(raw=>{
+  rawLines.forEach((raw, idx)=>{
     const l = raw.trim();
     if(!l){ if(inTbl){ h += '</table>'+addBtn; inTbl = false; } return; }
     const cells = l.split(/\t+/).map(x=>x.trim()).filter(Boolean);
-    const isSet = cells.length>=2 && /^[\d.,\-]+$/.test(cells[0]) && /^[\d.,\-]+$/.test(cells[1]);
-    if(isSet){
-      if(!inTbl){ h += '<table class="cptbl"><tr><td class="cpty">SETS</td><td class="cpty">WEIGHT</td><td class="cpty">TYPE / NOTE</td></tr>'; inTbl = true; }
-      h += '<tr><td contenteditable inputmode="numeric">'+esc(cells[0])+'</td><td contenteditable inputmode="decimal">'+esc(cells[1])+'</td><td contenteditable>'+esc(cells[2]||"")+'</td></tr>';
+    if(isSetLine(l)){
+      if(!inTbl){ h += '<table class="cptbl"><tr><td class="cpty">SETS</td><td class="cpty">WEIGHT</td><td class="cpty">TYPE / NOTE</td><td class="cpty" style="width:26px"></td></tr>'; inTbl = true; }
+      h += '<tr><td contenteditable inputmode="numeric">'+esc(cells[0])+'</td><td contenteditable inputmode="decimal">'+esc(cells[1])+'</td><td contenteditable>'+esc(cells[2]||"")+'</td><td class="cpdel" onclick="flowDelSet(this)">\u2715</td></tr>';
       return;
     }
     if(inTbl){ h += '</table>'+addBtn; inTbl = false; }
-    h += '<div class="cpexname" contenteditable>'+esc(l)+'</div>';
+    /* is this line an exercise name? (its table starts on the next non-empty line) */
+    let nxt = idx+1;
+    while(nxt < rawLines.length && !rawLines[nxt].trim()) nxt++;
+    const isExName = nxt < rawLines.length && isSetLine(rawLines[nxt].trim());
+    if(isExName){
+      h += '<div class="cpexwrap"><div class="cpexname" contenteditable>'+esc(l)+'</div><span class="cpexdel" onclick="flowDelEx(this)">\ud83d\uddd1</span></div>';
+    } else {
+      h += '<div class="cpexname" contenteditable>'+esc(l)+'</div>';
+    }
   });
   if(inTbl) h += '</table>'+addBtn;
   return h;
+}
+function flowDelSet(td){
+  const tr = td.parentElement, tbl = tr.closest("table");
+  openListModal("Delete this set?", [
+    {name:"\ud83d\uddd1 Delete set", danger:true},
+    {name:"Keep it"}
+  ], (j)=>{
+    closeModal();
+    if(j!==0) return;
+    tr.remove();
+    if(tbl && tbl.rows.length<=1){
+      /* last set gone - the whole exercise goes with it */
+      const wrap = tbl.previousElementSibling;
+      const add = tbl.nextElementSibling;
+      if(add && add.classList && add.classList.contains("addsetlink")) add.remove();
+      if(wrap && wrap.classList && wrap.classList.contains("cpexwrap")) wrap.remove();
+      tbl.remove();
+    }
+    flowTableInput();
+    toast("Set deleted");
+  });
+}
+function flowDelEx(btn){
+  const wrap = btn.closest(".cpexwrap");
+  const name = wrap ? wrap.querySelector(".cpexname").textContent.trim() : "this exercise";
+  openListModal("Remove "+name+"?", [
+    {name:"\ud83d\uddd1 Remove exercise & its sets", danger:true},
+    {name:"Keep it"}
+  ], (j)=>{
+    closeModal();
+    if(j!==0) return;
+    let el = wrap.nextElementSibling;
+    while(el && !(el.classList && (el.classList.contains("cpexwrap") || el.classList.contains("cpexname")))){
+      const dead = el; el = el.nextElementSibling;
+      if(dead.tagName==="TABLE" || (dead.classList && dead.classList.contains("addsetlink"))) dead.remove();
+      else break;
+    }
+    wrap.remove();
+    flowTableInput();
+    toast("Exercise removed");
+  });
 }
 function flowTableInput(){
   const root = $("flowedit"); if(!root) return;
   const lines = [];
   [...root.children].forEach(el=>{
-    if(el.classList && el.classList.contains("cpexname")){
-      const txt = el.textContent.trim();
-      if(txt){ lines.push(txt); if(/sets each/i.test(txt)) lines.push(""); }
+    const nameEl = (el.classList && el.classList.contains("cpexwrap")) ? el.querySelector(".cpexname")
+      : (el.classList && el.classList.contains("cpexname")) ? el : null;
+    if(nameEl){
+      const txt = nameEl.textContent.trim();
+      if(txt){ lines.push(txt); if(/sets each|sets:/i.test(txt)) lines.push(""); }
     } else if(el.tagName === "TABLE"){
       [...el.rows].forEach((row,i)=>{
         if(i===0) return;
-        const c = [...row.cells].map(td=>td.textContent.trim());
+        const c = [...row.cells].filter(td=>!td.classList.contains("cpdel")).map(td=>td.textContent.trim());
         if(!c[0] && !c[1]) return;
         lines.push((c[0]||"-")+"\t"+(c[1]||"-")+(c[2]?"\t"+c[2]:""));
       });
@@ -2217,9 +2278,10 @@ function flowAddSet(btn){
   if(!tbl || tbl.tagName!=="TABLE") return;
   const last = tbl.rows[tbl.rows.length-1];
   const tr = tbl.insertRow(-1);
-  const reps = tr.insertCell(-1), wt = tr.insertCell(-1), ty = tr.insertCell(-1);
+  const reps = tr.insertCell(-1), wt = tr.insertCell(-1), ty = tr.insertCell(-1), del = tr.insertCell(-1);
   reps.contentEditable = wt.contentEditable = ty.contentEditable = "true";
   reps.setAttribute("inputmode","numeric"); wt.setAttribute("inputmode","decimal");
+  del.className = "cpdel"; del.textContent = "\u2715"; del.onclick = function(){ flowDelSet(del); };
   reps.textContent = last && last.cells[0] ? last.cells[0].textContent : "10";
   wt.textContent = last && last.cells[1] ? last.cells[1].textContent : "30";
   ty.textContent = "";
