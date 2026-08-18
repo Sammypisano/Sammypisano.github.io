@@ -1245,6 +1245,11 @@ function waterFor(iso){
   const fe = foodFor(iso);
   return Math.max(tap, (fe && fe.water) || 0);
 }
+const STEPS_TARGET = 10000; /* steps per day - synced from MyFitnessPal, never entered by hand */
+function stepsFor(iso){
+  const fe = foodFor(iso);
+  return (fe && fe.steps) || 0;
+}
 function addWater(oz){
   if(!state.water) state.water = {};
   const iso = todayISO();
@@ -1456,6 +1461,17 @@ async function pollRemoteFood(){
           changed++;
         }
       });
+    }
+    if(Array.isArray(j.weights)){
+      if(!state.weights) state.weights = [];
+      j.weights.forEach(w=>{
+        if(!w || !w.date || w.weight==null) return;
+        const cur = state.weights.find(x=>x.date===w.date);
+        if(!cur){ state.weights.unshift({date:w.date, weight:w.weight, loggedAt:"synced"}); changed++; }
+        else if(cur.weight !== w.weight){ cur.weight = w.weight; changed++; }
+      });
+      state.weights.sort((a,b)=>b.date.localeCompare(a.date));
+      state.weights = state.weights.filter(w=>w.date >= yearAgoISO());
     }
     state.foodRemoteTs = j.ts || Date.now();
     if(changed){
@@ -3345,6 +3361,26 @@ function renderBodyResults(){
       <div class="mmeta" style="flex:1"><div class="mname">${m.label}</div><div style="margin-top:3px">${chip}</div></div>
       <div class="spark">${sparkline(muscleSeries(m.key).map(p=>p.score))}</div><div class="chev">\u203a</div></div>`;
   });
+  /* Bodyweight - weigh-ins synced from MyFitnessPal, never entered here */
+  const wl = (state.weights||[]).filter(w=>w && w.weight!=null).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  if(wl.length){
+    const latest = wl[wl.length-1];
+    const changeOver = days=>{
+      const d = new Date(); d.setDate(d.getDate()-days);
+      const ci = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+      const prior = wl.filter(w=>w.date <= ci);
+      const base = prior.length ? prior[prior.length-1] : wl[0];
+      if(!base || base.date === latest.date) return null;
+      return Math.round((latest.weight - base.weight)*10)/10;
+    };
+    const fmt = v => v==null ? `<span style="color:var(--dim2)">not enough history</span>`
+      : `<b style="color:${v<0?"var(--green)":v>0?"#c9a227":"var(--dim2)"}">${v>0?"+":""}${v}</b>`;
+    html += `<div class="ohead" style="margin-top:22px"><div class="h1 disp" style="margin:0">Bodyweight</div></div>
+    <div class="emptybox" style="margin-bottom:10px">Weigh-ins synced from MyFitnessPal. Day-to-day swings are mostly water and food volume \u2014 the 30-day direction is the real signal, and it only means something read next to protein and the Strength Index above.</div>
+    <div class="orow"><div class="oscore">${latest.weight}</div>
+      <div class="spark" style="flex:1">${sparkline(wl.map(w=>w.weight))}</div></div>
+    <div class="lel" style="font-size:12.5px;line-height:1.6">Latest <b>${latest.date}</b> \u00b7 7-day ${fmt(changeOver(7))} \u00b7 30-day ${fmt(changeOver(30))} <span style="color:var(--dim2)">\u00b7 ${wl.length} weigh-in${wl.length>1?"s":""} on record</span></div>`;
+  }
   $("bodycontent").innerHTML = html;
 }
 
@@ -3703,6 +3739,11 @@ function openFoodDay(iso){
     if(!arr.length) items.push({name:"\u2014 nothing logged", sub:"sync from MyFitnessPal to fill this in"});
     arr.forEach(x=>items.push({name:x.name, sub:[x.kcal!=null?comma(x.kcal)+" kcal":null, x.p!=null?x.p+"p":null, x.c!=null?x.c+"c":null, x.f!=null?x.f+"f":null].filter(Boolean).join(" \u00b7 ")}));
   });
+  const stp = stepsFor(iso);
+  if(stp){
+    items.push({header:true, name:"Movement"});
+    items.push({name:"👟 "+comma(stp)+" steps", sub:Math.round(stp/STEPS_TARGET*100)+"% of the "+comma(STEPS_TARGET)+" goal"});
+  }
   items.push({header:true, name:"Supplements"});
   const on = state.supps && state.supps[iso];
   items.push({name:(on?"\ud83d\udc8a Creatine + supps taken \u2713":"\ud83d\udc8a Creatine + supps \u2014 not marked"), sub:"tap to toggle", supp:true, check:!!on});
@@ -3872,6 +3913,11 @@ function foodAnalysisHtml(){
       const avgW = Math.round(days.reduce((a,b)=>a+b,0)/days.length);
       const hit = days.filter(w=>w>=WATER_TARGET*0.85).length;
       return `<div class="lel" style="font-size:12.5px;line-height:1.6;margin-top:6px">\ud83d\udca7 <b>Water:</b> averaging <b style="color:${avgW>=WATER_TARGET*0.85?"var(--green)":"#c9a227"}">${avgW} oz</b> over ${days.length} tracked day${days.length>1?"s":""} (goal ${WATER_TARGET}) \u2014 ${hit}/${days.length} hit it. ${avgW>=WATER_TARGET*0.85?"That's a 5% recovery bonus working for you.":"Under 85% costs recovery speed \u2014 muscles are mostly water."}</div>`; })()}
+    ${(()=>{ const days=[]; for(let i=0;i<7;i++){ const d=new Date(); d.setDate(d.getDate()-i); const di=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); const s=stepsFor(di); if(s>0) days.push(s); }
+      if(!days.length) return "";
+      const avgS = Math.round(days.reduce((a,b)=>a+b,0)/days.length);
+      const hitS = days.filter(s=>s>=STEPS_TARGET).length;
+      return `<div class="lel" style="font-size:12.5px;line-height:1.6;margin-top:6px">\ud83d\udc5f <b>Steps:</b> averaging <b style="color:${avgS>=STEPS_TARGET?"var(--green)":"#c9a227"}">${comma(avgS)}</b> over ${days.length} tracked day${days.length>1?"s":""} (goal ${comma(STEPS_TARGET)}) \u2014 ${hitS}/${days.length} hit it.${avgS>=STEPS_TARGET?"":" Daily walking is the cheapest deficit there is \u2014 it costs no recovery."}</div>`; })()}
     <div class="lel" style="font-size:12.5px;line-height:1.6;margin-top:6px">\ud83c\udfc3 <b>Race:</b> ${a.runCarb!=null&&a.restCarb!=null?`run days average ${a.runCarb}g carbs vs ${a.restCarb}g on rest days \u2014 ${a.runCarb>a.restCarb?"good instinct, keep carbs near runs.":"flip that: put more carbs on run days, fewer on rest days."}`:`log food on run days and I'll check your fueling around miles.`}</div>
     ${fed.length?`<div class="chlbl" style="margin:14px 0 5px">Meal pattern <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:700">avg per day</span></div>
       ${fed.map(m=>`<div style="display:flex;align-items:center;font-size:12.5px;font-weight:700;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="flex:0 0 82px;text-transform:capitalize">${m.name}</div><div style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.07);margin:0 10px"><div style="height:6px;border-radius:3px;width:${Math.min(100,Math.round(m.kcal/Math.max(1,Math.max(...fed.map(x=>x.kcal)))*100))}%;background:var(--accent)"></div></div><div style="width:110px;text-align:right;color:var(--dim);font-size:11.5px">${comma(m.kcal)} kcal \u00b7 ${m.p}g p</div></div>`).join("")}
@@ -4629,6 +4675,7 @@ function foodSectionHtml(iso){
       ${fe.protein!=null?`<div style="display:inline-block;font-size:10px;font-weight:800;border-radius:9px;padding:3px 8px;margin-top:5px;${pOK?"color:var(--green);background:rgba(61,220,151,.1);border:1px solid rgba(61,220,151,.35)":"color:#c9a227;background:rgba(201,162,39,.08);border:1px solid rgba(201,162,39,.3)"}">${pOK?"\u2713 protein target hit":"protein "+fe.protein+" / "+FOOD_TARGET.protein+" g"}</div>`:""}
       ${mrows || `<div class="lel" style="font-size:12.5px;color:var(--dim2);margin-top:6px">no meal detail synced</div>`}
       ${waterFor(iso)>0?`<div class="lel" style="font-size:12px;margin-top:8px;color:#9cc4ff">\ud83d\udca7 ${waterFor(iso)} oz water \u00b7 ${Math.round(waterFor(iso)/WATER_TARGET*100)}% of target</div>`:""}
+      ${stepsFor(iso)>0?`<div class="lel" style="font-size:12px;margin-top:8px;color:#9cc4ff">\ud83d\udc5f ${comma(stepsFor(iso))} steps \u00b7 ${Math.round(stepsFor(iso)/STEPS_TARGET*100)}% of target</div>`:""}
       ${state.supps&&state.supps[iso]?`<div class="lel" style="font-size:12px;margin-top:8px;color:var(--green)">\ud83d\udc8a supplements taken \u2713</div>`:""}
     </div></div>`;
 }

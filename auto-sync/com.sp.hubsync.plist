@@ -10,6 +10,12 @@
     <string>$HOME/.hub-sync/venv/bin/python3 $HOME/.hub-sync/mfp_auto_sync.py</string>
   </array>
   <key>StartInterval</key><integer>10800</integer>
+  <!-- end-of-day run so the day's step count is complete before midnight -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>23</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/tmp/hubsync.out</string>
   <key>StandardErrorPath</key><string>/tmp/hubsync.err</string>
