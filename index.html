@@ -4520,6 +4520,7 @@ function renderDash(){
     </div>
     <div class="mgcard" id="dashrecov" style="padding:13px 15px;margin-bottom:10px">${recoveryHtml()}</div>
     ${logCalHtml()}
+    ${pastWorkoutsHtml()}
     <div style="height:8px"></div>
     <div class="dim" style="font-size:10.5px;text-align:center;margin-top:6px;line-height:1.6">The deep picture \u2014 food analysis & coach \u2014 lives on the computer dashboard.<br>Everything you log here feeds it.</div>
     <div style="height:16px"></div>`;
@@ -4888,6 +4889,45 @@ function foodSectionHtml(iso){
       ${waterFor(iso)>0?`<div class="lel" style="font-size:12px;margin-top:8px;color:#9cc4ff">\ud83d\udca7 ${waterFor(iso)} oz water \u00b7 ${Math.round(waterFor(iso)/WATER_TARGET*100)}% of target</div>`:""}
       ${state.supps&&state.supps[iso]?`<div class="lel" style="font-size:12px;margin-top:8px;color:var(--green)">\ud83d\udc8a supplements taken \u2713</div>`:""}
     </div></div>`;
+}
+function pastWorkoutsHtml(){
+  /* every workout day ever logged (lifts + runs), newest first, grouped by month -
+     tap a row to open the full day detail. Food-only days stay out of this list. */
+  const days = logDays();
+  const list = Object.values(days).filter(d=>(d.entries&&d.entries.length)||(d.runs&&d.runs.length))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  if(!list.length) return "";
+  const MOS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+  const DOW = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+  let curMo = "";
+  const rows = list.map(d=>{
+    const mo = d.date.slice(0,7);
+    let head = "";
+    if(mo!==curMo){ curMo = mo;
+      head = `<div style="font-size:10px;font-weight:800;letter-spacing:.09em;color:var(--dim2);margin:11px 2px 6px">${MOS[+mo.slice(5,7)-1]} ${mo.slice(0,4)}</div>`;
+    }
+    const lifts = d.entries||[], runs = d.runs||[];
+    const names = [...new Set(lifts.map(e=>e.name))];
+    const sets = lifts.reduce((a,e)=>a+e.sets.length,0);
+    const meta = [
+      names.length ? names.length+" exercise"+(names.length>1?"s":"")+" · "+sets+" sets · ~"+estMin(d)+" min" : null,
+      runs.length ? runs.map(r=>r.name+(r.time?" · "+r.time+" min":"")).join(", ") : null
+    ].filter(Boolean).join("  +  ");
+    const dt = new Date(d.date+"T12:00:00");
+    const dot = (names.length?'<span style="color:#ff5c7a">●</span>':'')+(runs.length?' <span style="color:#4c9aff">●</span>':'');
+    return head+`<div class="mgcard" style="padding:10px 13px;margin:0 0 7px;display:flex;align-items:center;gap:11px" onclick="openLogDetail('${d.date}')">
+      <div style="width:40px;text-align:center;flex-shrink:0">
+        <div style="font-size:16px;font-weight:800;line-height:1.1">${dt.getDate()}</div>
+        <div style="font-size:9px;font-weight:800;color:var(--dim2)">${DOW[dt.getDay()]}</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:800;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(dayTitle(d))} ${dot}</div>
+        <div style="font-size:11px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(meta)}</div>
+      </div>
+      <span style="color:var(--dim2);font-weight:800;font-size:15px">›</span>
+    </div>`;
+  }).join("");
+  return `<div class="lg-sechead" style="margin-top:14px">Past workouts<span style="margin-left:auto;font-size:10px;font-weight:800;color:var(--dim2)">${list.length} DAYS · ALL TIME</span></div>${rows}`;
 }
 function daySectionsHtml(iso){
   const day = logDays()[iso] || {date:iso, entries:[], runs:[]};
