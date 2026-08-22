@@ -43,8 +43,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
   font-family:inherit;font-size:12.5px;font-weight:800;padding:11px 16px;cursor:pointer;}
 .dbtn.primary{background:linear-gradient(90deg,#ff7a3d,#ff3d77);border:none;color:#fff;box-shadow:0 6px 18px rgba(255,61,119,.35);}
 .dgrid{display:grid;grid-template-columns:minmax(300px,400px) 1fr;gap:16px;align-items:start;}
-.dgrid3{display:grid;grid-template-columns:minmax(285px,345px) minmax(330px,1fr) minmax(295px,370px);gap:16px;align-items:start;}
-@media(max-width:1120px){ body.wide .dgrid3{grid-template-columns:1fr 1fr;} body.wide .dgrid3 .dcol:nth-child(3){grid-column:1/-1;} }
+.board{background:var(--card);border:1.5px solid var(--line);border-radius:22px;padding:6px 26px 22px;}
+.bband{padding:18px 0 14px;border-bottom:1px solid rgba(255,255,255,.06);}
+.bband:last-child{border-bottom:none;padding-bottom:6px;}
+.bhead{display:flex;align-items:baseline;gap:12px;font-size:10.5px;font-weight:900;letter-spacing:.09em;color:var(--dim);margin-bottom:12px;}
+.blegend{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.03em;color:var(--dim2);display:flex;align-items:center;gap:5px;flex-wrap:wrap;}
+.blegend i{width:8px;height:8px;display:inline-block;border-radius:2px;margin-right:2px;}
+.bstrip{display:flex;align-items:stretch;gap:0;}
+.bcell{flex:1;min-width:0;padding:2px 18px;border-right:1px solid rgba(255,255,255,.06);}
+.bcell:first-child{padding-left:2px;}
+.bcell:last-child{border-right:none;}
+.bk{font-size:9.5px;font-weight:900;letter-spacing:.09em;color:var(--dim2);margin-bottom:5px;}
+.bhv{font-size:42px;font-weight:900;letter-spacing:-.02em;line-height:1;}
+.bv{font-size:24px;font-weight:900;letter-spacing:-.01em;line-height:1.15;}
+.bv span{font-size:12px;font-weight:800;color:var(--dim2);margin-left:3px;}
+.bks{font-size:10px;font-weight:700;color:var(--dim);margin-top:5px;line-height:1.4;}
+.bmeter{height:7px;border-radius:4px;background:rgba(255,255,255,.07);margin-top:9px;overflow:hidden;}
+.bmeter div{height:7px;border-radius:4px;}
+.bsplit{display:flex;align-items:flex-start;}
+@media(max-width:1120px){ body.wide .bsplit{display:block;} body.wide .bsplit>div{border-right:none !important;padding:0 !important;} body.wide .bstrip{flex-wrap:wrap;} body.wide .bcell{flex:1 1 30%;padding:8px 14px;} }
 body.wide .fab{display:none;}
 body.wide #dashcontent *{cursor:default !important;}
 .dcol>*{margin-bottom:14px;}
@@ -4175,6 +4192,76 @@ function gateUpload(){
     }
   }, 900);
 }
+/* ---- unified board: one time axis for food + training + water ---- */
+function boardDays(n){
+  const out = [];
+  const days = logDays();
+  for(let i=n-1;i>=0;i--){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const iso = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    const fe = foodFor(iso);
+    const dd = days[iso];
+    out.push({iso, wd:["Su","Mo","Tu","We","Th","Fr","Sa"][d.getDay()], dom:d.getDate(),
+      kcal: fe&&fe.kcal?fe.kcal:0, protein: fe&&fe.protein?fe.protein:0,
+      lift: !!(dd&&dd.entries&&dd.entries.length), run: !!(dd&&dd.runs&&dd.runs.length),
+      water: waterFor(iso), today: i===0});
+  }
+  return out;
+}
+/* ---- the point of the board: what to adjust, ranked ---- */
+function boardAdjust(){
+  const T = FOOD_TARGET, iso = todayISO(), items = [];
+  const fe = foodFor(iso);
+  const pToday = fe&&fe.protein?Math.round(fe.protein):0;
+  const kToday = fe&&fe.kcal?Math.round(fe.kcal):0;
+  const a = foodAnalysis();
+  const hr = new Date().getHours();
+  /* protein - the #1 lever */
+  if(pToday >= T.protein*0.95)
+    items.push({sev:2, icon:"💪", t:"Protein is done — "+pToday+"g", why:"recomp math is funded for today", cur:pToday, tgt:T.protein, unit:"g"});
+  else
+    items.push({sev:(hr>=17 && pToday<T.protein*0.7)?0:1, icon:"💪", t:"Eat "+(T.protein-pToday)+"g more protein today",
+      why:pToday+" of "+T.protein+"g so far — the single biggest lever for keeping muscle while the fat drains", cur:pToday, tgt:T.protein, unit:"g"});
+  /* calorie window */
+  if(kToday > T.kcal+150)
+    items.push({sev:1, icon:"🔥", t:"Calories over budget by "+comma(kToday-T.kcal), why:"the lower-belly zone only drains in a deficit — close the kitchen", cur:kToday, tgt:T.kcal, unit:"kcal"});
+  else if(a && a.lowDays >= 3)
+    items.push({sev:1, icon:"🍽", t:"Stop dipping under 1,600 kcal", why:a.lowDays+" of the last "+a.n+" logged days were too deep — that burns muscle, not just fat", cur:a.avgK, tgt:1900, unit:"kcal avg"});
+  else if(a)
+    items.push({sev:2, icon:"🔥", t:"Deficit is in the recomp lane", why:"averaging "+comma(a.avgK)+" kcal vs "+comma(T.kcal)+" budget", cur:a.avgK, tgt:T.kcal, unit:"kcal"});
+  /* water */
+  const w2 = [waterFor(iso), waterFor((()=>{const d=new Date();d.setDate(d.getDate()-1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})())];
+  const wAvg = Math.round((w2[0]+w2[1])/2);
+  if(wAvg < WATER_TARGET*0.5)
+    items.push({sev:1, icon:"💧", t:"Water is costing you recovery", why:wAvg+" oz avg vs "+WATER_TARGET+" — under 50% slows every muscle's clock 15%", cur:wAvg, tgt:WATER_TARGET, unit:"oz"});
+  else if(wAvg < WATER_TARGET*0.85)
+    items.push({sev:1, icon:"💧", t:"Drink "+(WATER_TARGET-w2[0])+" oz more today", why:"85%+ of "+WATER_TARGET+" oz flips recovery 5% faster", cur:wAvg, tgt:WATER_TARGET, unit:"oz"});
+  else
+    items.push({sev:2, icon:"💧", t:"Hydration bonus active", why:wAvg+" oz avg — recovery decays 5% faster", cur:wAvg, tgt:WATER_TARGET, unit:"oz"});
+  /* race build */
+  const race = new Date("2026-11-21T12:00:00");
+  const wksOut = Math.max(0, Math.round((race - new Date())/6048e5));
+  let lastRun = null; (state.runs||[]).forEach(r=>{ if(!lastRun || r.date>lastRun) lastRun = r.date; });
+  const sinceRun = lastRun ? Math.floor(daysAgo(lastRun)) : null;
+  const wkMin = (state.runs||[]).filter(r=>daysAgo(r.date)<=7).reduce((x,r)=>x+(Number(r.time)||0),0);
+  if(sinceRun===null || sinceRun > 4)
+    items.push({sev:1, icon:"🏃", t:"Get a run in — "+(sinceRun===null?"none logged yet":sinceRun+" days since the last"), why:wksOut+" weeks to the half — the engine needs ~3 runs a week", cur:wkMin, tgt:90, unit:"min/wk"});
+  else
+    items.push({sev:2, icon:"🏃", t:"Run cadence on track", why:wkMin+" min this week · "+wksOut+" weeks to race day", cur:wkMin, tgt:90, unit:"min/wk"});
+  /* training due - freshest muscles longest untouched */
+  const due = RECOVERY_MUSCLES.map(m=>({m, p:muscleFatiguePct(m.key), last:groupLastHit(m.key)}))
+    .filter(x=>x.p<=5).map(x=>({...x, d:x.last?Math.floor(daysAgo(x.last)):99}))
+    .sort((x,y)=>y.d-x.d).slice(0,3);
+  if(due.length)
+    items.push({sev:1, icon:"🏋️", t:"Fresh and waiting: "+due.map(x=>x.m.label).join(", "),
+      why:"fully recovered"+(due[0].d<99?" — "+due[0].m.label+" hasn't been hit in "+due[0].d+" days":"")+" — highest-return session available", cur:null});
+  /* stagnant muscles */
+  const slip = BODY_MUSCLES.map(m=>({m, g:muscleGainStat(m.key)})).filter(x=>x.g.st==="stagnant"||x.g.st==="down");
+  if(slip.length && !calibrating())
+    items.push({sev:1, icon:"📉", t:"Stalled: "+slip.slice(0,3).map(x=>x.m.label).join(", "), why:"e1RM flat or slipping — the builder will concentrate their sets; fuel + sleep matter most here", cur:null});
+  items.sort((x,y)=>x.sev-y.sev);
+  return items.slice(0,7);
+}
 function renderDash(){
   const el = $("dashcontent"); if(!el) return;
   const iso = todayISO();
@@ -4203,143 +4290,183 @@ function renderDash(){
     <text x="46" y="43" text-anchor="middle" fill="#eef0f6" font-size="15" font-weight="800">${comma(Math.abs(rem))}</text>
     <text x="46" y="58" text-anchor="middle" fill="#8b8698" font-size="7.5" font-weight="800">${rem>=0?"KCAL LEFT":"OVER"}</text></svg>`;
   if(window.innerWidth >= 760){
-    /* ===== COMPUTER BOARD v75: pure display - nothing to click, nothing to enlarge ===== */
-    const days2 = logDays();
-    let lastAll = null;
-    ["rec","eos"].forEach(g=>Object.values(state.histories[g]||{}).forEach(hs=>hs.forEach(h=>{ if(!lastAll || h.date>lastAll) lastAll = h.date; })));
-    (state.runs||[]).forEach(r=>{ if(!lastAll || r.date>lastAll) lastAll = r.date; });
-    const daysSince = lastAll ? Math.floor(daysAgo(lastAll)) : "\u2014";
-    const freshN = RECOVERY_MUSCLES.filter(m=>muscleFatigue(m.key)<=0.02).length;
-    const pcts = RECOVERY_MUSCLES.map(m=>({m, p: muscleFatiguePct(m.key)})).sort((a,b)=>b.p-a.p);
-    const fatigueRows = pcts.map(x=>{
-      const c = x.p>=67 ? "#ff5c7a" : x.p>=34 ? "#c9a227" : "var(--green)";
-      return `<div style="display:flex;align-items:center;font-size:12px;font-weight:700;padding:3px 0">
-        <div style="flex:0 0 88px">${x.m.label}</div>
-        <div style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.07);margin:0 9px">
-          <div style="height:6px;border-radius:3px;width:${x.p}%;background:${c}"></div></div>
-        <div style="width:38px;text-align:right;font-weight:800;color:${c}">${x.p}%</div></div>`;
+    /* ===== ONE BOARD v77: a single canvas, built around "what do I adjust" ===== */
+    const T = FOOD_TARGET;
+    const bd = boardDays(14);
+    const adj = boardAdjust();
+    const a = foodAnalysis();
+    const race = new Date("2026-11-21T12:00:00");
+    const raceDays = Math.max(0, Math.round((race - new Date())/864e5));
+    const pToday = e&&e.protein?Math.round(e.protein):0;
+    const wToday = waterFor(iso);
+    const wt = (DB.muscleRef.goals_v2 && DB.muscleRef.goals_v2.weight_tracking) || {current_lb:188, start_lb:190};
+    /* --- band 2: the 14-day fusion ribbon --- */
+    const RIB_H = 96, BUD_Y = Math.round(RIB_H * (1 - Math.min(1, T.kcal/3200)));
+    const maxK = Math.max(3200, ...bd.map(d=>d.kcal));
+    const cols = bd.map(d=>{
+      const h = d.kcal ? Math.max(4, Math.round(RIB_H * d.kcal/maxK)) : 0;
+      const c = !d.kcal ? "transparent" : d.kcal > T.kcal+150 ? "#ff5c7a" : d.kcal < 1600 ? "#c9a227" : "var(--green)";
+      const pHit = d.protein >= T.protein*0.95;
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0">
+        <div style="height:${RIB_H}px;width:100%;max-width:24px;display:flex;align-items:flex-end;justify-content:center;position:relative">
+          ${d.kcal?`<div style="width:100%;height:${h}px;background:${c};border-radius:4px 4px 0 0;${d.today?"outline:2px solid rgba(255,255,255,.35);outline-offset:1px;":""}"></div>`:`<div style="width:100%;height:3px;background:rgba(255,255,255,.06);border-radius:2px"></div>`}
+        </div>
+        <div style="height:14px;display:flex;align-items:center;font-size:10px;font-weight:900;color:${pHit?"var(--green)":d.protein?"#c9a227":"rgba(255,255,255,.14)"}">${d.protein?(pHit?"✓":"✗"):"·"}</div>
+        <div style="height:12px;display:flex;gap:3px;align-items:center">
+          ${d.lift?'<span style="width:7px;height:7px;border-radius:2px;background:#ff5c7a;display:block"></span>':""}
+          ${d.run?'<span style="width:7px;height:7px;border-radius:50%;background:#4c9aff;display:block"></span>':""}
+          ${d.water>=WATER_TARGET*0.85?'<span style="font-size:8px">💧</span>':""}
+        </div>
+        <div style="font-size:9px;font-weight:800;color:${d.today?"var(--accent)":"var(--dim2)"};margin-top:3px">${d.wd}<br>${d.dom}</div>
+      </div>`;
     }).join("");
-    /* static month calendar - no nav, no day clicks */
-    const now2 = new Date();
-    const MOS2 = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    const first2 = new Date(now2.getFullYear(), now2.getMonth(), 1);
-    const start2 = new Date(first2); start2.setDate(1 - first2.getDay());
-    let calCells = "";
-    for(let ci=0; ci<42; ci++){
-      const d2 = new Date(start2); d2.setDate(start2.getDate()+ci);
-      const iso2 = d2.getFullYear()+"-"+String(d2.getMonth()+1).padStart(2,"0")+"-"+String(d2.getDate()).padStart(2,"0");
-      const inMo = d2.getMonth()===now2.getMonth();
-      const has2 = days2[iso2];
-      const lift2 = !!(has2 && has2.entries && has2.entries.length);
-      const run2 = !!(has2 && has2.runs && has2.runs.length);
-      const food2 = dayHasFood(iso2);
-      const isToday2 = iso2===iso;
-      calCells += `<div class="lcal-cell ${inMo?"":"out"}">
-        <span class="lcal-num ${isToday2?"today":""}">${d2.getDate()}</span>
-        <span class="lcal-dur" style="letter-spacing:1.5px">${lift2?'<span style="color:#ff5c7a">\u25cf</span>':''}${run2?'<span style="color:#4c9aff">\u25cf</span>':''}${food2?'<span style="color:var(--green)">\u25cf</span>':''}${(lift2||run2||food2)?"":"&nbsp;"}</span>
+    const sevMeta = [
+      {dot:"#ff5c7a", label:"DO THIS NOW"},
+      {dot:"#c9a227", label:"ADJUST"},
+      {dot:"var(--green)", label:"WORKING — KEEP IT"}
+    ];
+    const adjRows = adj.map(x=>{
+      const m = sevMeta[x.sev];
+      const pct = (x.cur!=null && x.tgt) ? Math.min(100, Math.round(x.cur/x.tgt*100)) : null;
+      return `<div style="display:flex;align-items:center;gap:13px;padding:11px 2px;border-bottom:1px solid rgba(255,255,255,.05)">
+        <span style="flex:0 0 9px;width:9px;height:9px;border-radius:50%;background:${m.dot}"></span>
+        <span style="flex:0 0 20px;font-size:15px">${x.icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800">${x.t}</div>
+          <div style="font-size:11px;color:var(--dim);font-weight:700;margin-top:2px;line-height:1.45">${x.why}</div>
+        </div>
+        ${pct!=null?`<div style="flex:0 0 132px">
+          <div style="height:7px;border-radius:4px;background:rgba(255,255,255,.07)"><div style="height:7px;border-radius:4px;width:${pct}%;background:${m.dot}"></div></div>
+          <div style="font-size:9.5px;font-weight:800;color:var(--dim2);margin-top:3px;text-align:right">${comma(Math.round(x.cur))} / ${comma(x.tgt)} ${x.unit}</div>
+        </div>`:""}
+      </div>`;
+    }).join("");
+    const fats2 = RECOVERY_MUSCLES.map(m=>({m, p:muscleFatiguePct(m.key)})).filter(x=>x.p>0).sort((x,y)=>y.p-x.p);
+    const freshList = RECOVERY_MUSCLES.filter(m=>muscleFatiguePct(m.key)===0).map(m=>m.label);
+    const fatRows = fats2.map(x=>{
+      const c = x.p>=67 ? "#ff5c7a" : x.p>=34 ? "#c9a227" : "var(--green)";
+      return `<div style="display:flex;align-items:center;font-size:11.5px;font-weight:700;padding:3px 0">
+        <div style="flex:0 0 82px">${x.m.label}</div>
+        <div style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.07);margin:0 8px"><div style="height:6px;border-radius:3px;width:${x.p}%;background:${c}"></div></div>
+        <div style="width:34px;text-align:right;font-weight:800;color:${c}">${x.p}%</div></div>`;
+    }).join("");
+    /* fuel band condensed from the analysis */
+    let fuel = "";
+    if(a){
+      const pk = a.avgK?Math.round(a.avgP*4/a.avgK*100):0, ck = a.avgK?Math.round(a.avgC*4/a.avgK*100):0, fk = a.avgK?Math.round(a.avgF*9/a.avgK*100):0;
+      const mac = (lbl,val,tgt)=>`<div style="display:flex;align-items:center;font-size:11px;font-weight:700;padding:3px 0">
+        <div style="flex:0 0 52px;color:var(--dim)">${lbl}</div>
+        <div style="flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.07);margin:0 8px;position:relative">
+          <div style="height:6px;border-radius:3px;width:${Math.min(100,val)}%;background:rgba(255,255,255,.32)"></div>
+          <div style="position:absolute;top:-2px;left:${Math.min(100,tgt)}%;width:2px;height:10px;background:var(--accent)"></div></div>
+        <div style="width:64px;text-align:right;color:var(--dim2)">${val}% <span style="opacity:.6">/ ${tgt}</span></div></div>`;
+      const swaps = (a.lowReturn||[]).slice(0,2).map(x=>`<div style="font-size:11.5px;font-weight:700;color:var(--dim);padding:2px 0">🔁 <b style="color:var(--txt)">${esc(x.name)}</b> → protein-dense version <span style="color:var(--dim2)">(${comma(Math.round(x.k))} kcal · ${Math.round(x.p)}g)</span></div>`).join("");
+      fuel = `<div style="display:grid;grid-template-columns:auto 1fr 1fr 1.2fr;gap:26px;align-items:start">
+        <div style="text-align:center">
+          <div style="width:58px;height:58px;border-radius:16px;border:2px solid ${a.gradeColor};display:flex;align-items:center;justify-content:center;font-size:27px;font-weight:900;color:${a.gradeColor};margin:0 auto">${a.grade}</div>
+          <div style="font-size:10px;font-weight:800;color:var(--dim2);margin-top:6px">${a.score}/100 · ${a.n} days</div>
+        </div>
+        <div>
+          <div class="lp-stats-k" style="margin-bottom:5px">MACRO SPLIT · tick = target</div>
+          ${mac("Protein",pk,30)}${mac("Carbs",ck,40)}${mac("Fat",fk,30)}
+        </div>
+        <div>
+          <div class="lp-stats-k" style="margin-bottom:5px">AVERAGES</div>
+          <div style="font-size:12px;font-weight:800;padding:2px 0">${comma(a.avgK)} <span style="color:var(--dim2);font-weight:700">kcal / ${comma(T.kcal)}</span></div>
+          <div style="font-size:12px;font-weight:800;padding:2px 0;color:${a.avgP>=T.protein*0.95?"var(--green)":"#ff5c7a"}">${a.avgP}g <span style="color:var(--dim2);font-weight:700">protein / ${T.protein}g</span></div>
+          <div style="font-size:12px;font-weight:800;padding:2px 0">${a.pHit}/${a.n} <span style="color:var(--dim2);font-weight:700">days hit protein</span></div>
+        </div>
+        <div>
+          <div class="lp-stats-k" style="margin-bottom:5px">LOW-RETURN CALORIES</div>
+          ${swaps || '<div style="font-size:11.5px;color:var(--dim2);font-weight:700">nothing flagged — calories are earning their protein</div>'}
+        </div>
       </div>`;
     }
-    const fu2 = fuelStatus();
     let html = `
     <div class="dtop">
       <div><div class="dtitle">Health &amp; <span class="gradtxt">Fitness Hub</span></div>
         <div class="dsub">${fmtDate(iso,true)}</div></div>
       <div class="gymrow" style="margin:0">
-        ${calibrating()?`<span class="g1" style="color:#9cc4ff;border-color:rgba(76,154,255,.4);background:rgba(76,154,255,.08)">\ud83d\udd2c calibration \u00b7 ${calDaysLeft()}d left</span>`:""}
-        ${syncDue?'<span class="g1" style="color:#c9a227;border-color:rgba(201,162,39,.4);background:rgba(201,162,39,.08)">\u23f0 food sync due</span>':'<span class="g1" style="background:rgba(61,220,151,.12);border-color:rgba(61,220,151,.4);color:var(--green)">\u2713 food synced</span>'}
+        ${calibrating()?`<span class="g1" style="color:#9cc4ff;border-color:rgba(76,154,255,.4);background:rgba(76,154,255,.08)">🔬 calibration · ${calDaysLeft()}d left</span>`:""}
+        ${syncDue?'<span class="g1" style="color:#c9a227;border-color:rgba(201,162,39,.4);background:rgba(201,162,39,.08)">⏰ food sync due</span>':'<span class="g1" style="background:rgba(61,220,151,.12);border-color:rgba(61,220,151,.4);color:var(--green)">✓ food synced</span>'}
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:14px">
-        <div style="font-size:11px;font-weight:800;color:var(--dim2);text-align:right;line-height:1.4">\ud83d\udcf1 logged on your phone<br><span style="color:var(--dim)">${state.syncSeenTs?"last import "+new Date(state.syncSeenTs).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}):"not imported yet"}</span></div>
-        <button class="pullbtn" onclick="pullFromPhone()">\u21bb Pull from phone</button>
+        <div style="font-size:11px;font-weight:800;color:var(--dim2);text-align:right;line-height:1.4">📱 logged on your phone<br><span style="color:var(--dim)">${state.syncSeenTs?"last import "+new Date(state.syncSeenTs).toLocaleString([], {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}):"not imported yet"}</span></div>
+        <button class="pullbtn" onclick="pullFromPhone()">↻ Pull from phone</button>
       </div>
     </div>
-    <div class="dgrid3">
-      <div class="dcol">
-        <div class="mgcard" style="padding:14px 16px">
-          <div class="lp-stats-k" style="margin-bottom:8px">ENERGY</div>
-          <div style="display:flex;align-items:center;gap:13px">
-            <div style="flex-shrink:0">${ring}</div>
+    <div class="board">
+
+      <div class="bband bstrip">
+        <div class="bcell bhero">
+          <div class="bk">LEFT TODAY</div>
+          <div class="bhv">${comma(Math.abs(rem))}</div>
+          <div class="bks">${rem>=0?"kcal":"kcal OVER"} · ${comma(goal)} + <b style="color:var(--green)">${comma(burn.total)} exercise</b> − ${comma(eaten)}</div>
+        </div>
+        <div class="bcell">
+          <div class="bk">PROTEIN</div>
+          <div class="bv" style="color:${pToday>=T.protein*0.95?"var(--green)":"var(--txt)"}">${pToday}<span>/${T.protein}g</span></div>
+          <div class="bmeter"><div style="width:${Math.min(100,Math.round(pToday/T.protein*100))}%;background:${pToday>=T.protein*0.95?"var(--green)":"var(--accent)"}"></div></div>
+        </div>
+        <div class="bcell">
+          <div class="bk">WATER</div>
+          <div class="bv">${wToday}<span>/${WATER_TARGET}oz</span></div>
+          <div class="bmeter"><div style="width:${Math.min(100,Math.round(wToday/WATER_TARGET*100))}%;background:#4c9aff"></div></div>
+        </div>
+        <div class="bcell">
+          <div class="bk">TIREDNESS</div>
+          <div class="bv">${tl.label}</div>
+          <div class="bmeter"><div style="width:${tl.pct}%;background:${tl.pct>=67?"#ff5c7a":tl.pct>=34?"#c9a227":"var(--green)"}"></div></div>
+        </div>
+        <div class="bcell">
+          <div class="bk">STRENGTH</div>
+          <div class="bv">${overall==null?"—":overall}<span>index</span></div>
+          <div class="bks" style="color:${gUp?"var(--green)":"var(--dim2)"}">${gains.length?(gUp+" gaining"+(gWatch?" · "+gWatch+" watch":"")):"building baselines"}</div>
+        </div>
+        <div class="bcell">
+          <div class="bk">THE MISSION</div>
+          <div class="bv">${wt.current_lb||188}<span>lb</span></div>
+          <div class="bks">race in <b style="color:var(--accent)">${raceDays}d</b> · started ${wt.start_lb||190}</div>
+        </div>
+      </div>
+
+      <div class="bband">
+        <div class="bhead">LAST 14 DAYS — FOOD × TRAINING × WATER
+          <span class="blegend"><i style="background:var(--green)"></i>in range <i style="background:#c9a227"></i>under 1,600 <i style="background:#ff5c7a"></i>over budget
+            <span style="margin-left:10px"><i style="background:#ff5c7a;border-radius:2px"></i>lift <i style="background:#4c9aff;border-radius:50%"></i>run · ✓ protein hit · 💧 water 85%+</span></span></div>
+        <div style="position:relative;padding-top:4px">
+          <div style="position:absolute;left:0;right:0;top:${4+BUD_Y}px;border-top:1px solid rgba(255,255,255,.16)"></div>
+          <div style="position:absolute;right:0;top:${BUD_Y-8}px;font-size:9px;font-weight:800;color:var(--dim2);background:var(--card);padding:0 4px">2,350 budget</div>
+          <div style="display:flex;gap:2px;align-items:flex-end">${cols}</div>
+        </div>
+      </div>
+
+      <div class="bband bsplit">
+        <div style="flex:1.15;min-width:0;border-right:1px solid rgba(255,255,255,.06);padding-right:22px">
+          <div class="bhead">WHAT TO ADJUST — RANKED
+            <span class="blegend">${sevMeta.map(m2=>`<i style="background:${m2.dot};border-radius:50%"></i>${m2.label.toLowerCase()} `).join("")}</span></div>
+          ${adjRows}
+        </div>
+        <div style="flex:0.85;min-width:0;padding-left:22px">
+          <div class="bhead">BODY RIGHT NOW
+            <span class="blegend">${fats2.length?fats2.length+" recovering · ":""}${freshList.length} fresh</span></div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="flex:0 0 auto;display:flex;gap:6px">
+              <div class="recfig" style="margin:0;transform:scale(.82);transform-origin:top left">${recoveryFigure("front")}</div>
+              <div class="recfig" style="margin:0;transform:scale(.82);transform-origin:top left">${recoveryFigure("back")}</div>
+            </div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:10px;color:var(--dim2);font-weight:800;letter-spacing:.04em">${comma(goal)} GOAL <b style="color:var(--green)">+ ${comma(burn.total)} EXERCISE</b> \u2212 ${comma(eaten)} FOOD</div>
-              <div class="gymrow" style="margin:7px 0 0">
-                ${fu.st==="none"?'<span class="g2">no food logged today</span>'
-                  :fu.st==="on"?'<span class="g1" style="background:rgba(61,220,151,.12);border-color:rgba(61,220,151,.4);color:var(--green)">fueling on target</span>'
-                  :fu.st==="low"?'<span class="g1" style="color:#ff5c7a;border-color:rgba(255,61,119,.4);background:rgba(255,61,119,.08)">under-fueled</span>'
-                  :'<span class="g1" style="color:#c9a227;border-color:rgba(201,162,39,.4);background:rgba(201,162,39,.08)">close to target</span>'}
-                <span class="g2">${e&&e.protein!=null?e.protein:"0"} / ${FOOD_TARGET.protein}g protein</span>
-              </div></div></div></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-          <div class="mgcard" style="padding:11px 13px;margin:0">
-            <div class="lp-stats-k">TIREDNESS</div>
-            <div style="font-weight:800;font-size:18px;margin:3px 0 5px">${tl.label}</div>
-            <div class="ostrip">${Array.from({length:8},(_,i2)=>`<div class="obar ${i2<Math.round(tl.pct/100*8)?'fill':''}"></div>`).join("")}</div>
-          </div>
-          <div class="mgcard" style="padding:11px 13px;margin:0">
-            <div class="lp-stats-k">STRENGTH INDEX</div>
-            <div style="font-weight:800;font-size:18px;margin:3px 0 5px">${overall==null?"\u2014":overall}</div>
-            <div style="font-size:10px;font-weight:800;color:${gUp?"var(--green)":"var(--dim2)"}">${gains.length?(gUp+" gaining"+(gWatch?" \u00b7 "+gWatch+" to watch":"")):"building baselines"}</div>
-          </div>
-        </div>
-        <div class="mgcard" style="padding:12px 14px">
-          <div class="lp-stats-k" style="margin-bottom:7px">TODAY</div>
-          <div class="lel" style="font-size:13px">\ud83c\udfcb\ufe0f ${todayLog?`<b>${esc(todayLog.workout)}</b> \u00b7 ${(todayLog.exercises||[]).length} exercises \u00b7 ${esc(todayLog.gym||"")}`:'<span style="color:var(--dim2)">no lift logged yet</span>'}</div>
-          <div class="lel" style="font-size:13px;margin-top:4px">\ud83c\udfc3 ${todayRun?`<b>${esc(todayRun.name)}</b> \u00b7 ${todayRun.time||"?"} min${todayRun.dist?" \u00b7 "+todayRun.dist+" km":""}`:'<span style="color:var(--dim2)">no run logged</span>'}</div>
-        </div>
-        <div class="mgcard" style="padding:12px 14px">
-          <div class="lp-stats-k" style="margin-bottom:7px">\ud83c\udf4e FOOD FACTOR</div>
-          ${fu2.st==="none"?'<div class="dim" style="font-size:12px">nothing logged in the last 3 days</div>'
-            :`<div class="gymrow" style="margin:0">
-              ${fu2.kcal!=null?`<span class="${fu2.kr>=0.85?"g1":"g2"}">${comma(fu2.kcal)} / ${comma(FOOD_TARGET.kcal)} kcal</span>`:""}
-              ${fu2.protein!=null?`<span class="${fu2.pr>=0.9?"g1":"g2"}">${fu2.protein} / ${FOOD_TARGET.protein} g protein</span>`:""}</div>
-            <div class="dim" style="font-size:11px;margin-top:7px;line-height:1.5">${fu2.st==="on"?"On target \u2014 recovery gets full credit and progression runs unrestricted.":fu2.st==="low"?"Under-fueled \u2014 recovery is running slower and pushes are held back.":"Close \u2014 tighten protein to unlock everything."}</div>`}
-        </div>
-      </div>
-      <div class="dcol">
-        <div class="mgcard" style="padding:14px 16px">
-          <div style="display:flex;align-items:baseline;margin-bottom:8px"><div class="lp-stats-k">RECOVERY</div>
-            <div style="margin-left:auto;font-size:11px;font-weight:800;color:var(--dim)">${daysSince} day${daysSince===1?"":"s"} since last workout \u00b7 ${freshN} fresh groups</div></div>
-          <div style="display:flex;gap:14px;justify-content:center">
-            <div class="recfig" style="margin:0">${recoveryFigure("front")}</div>
-            <div class="recfig" style="margin:0">${recoveryFigure("back")}</div>
-          </div>
-          <div class="reclegend"><span><i style="background:#e6285a"></i>Fatigued</span><span><i style="background:#7a4660"></i>Recovering</span><span><i style="background:#3a3f4c"></i>Fresh</span></div>
-          <div style="display:flex;align-items:center;gap:12px;margin:12px 0 4px">
-            <div class="oscore" style="font-size:24px">${tl.label}</div>
-            <div class="dim" style="font-size:11.5px;line-height:1.5;flex:1">${tl.desc}</div></div>
-          <div class="ostrip" style="margin-bottom:12px">${Array.from({length:13},(_,i3)=>`<div class="obar ${i3<Math.round(tl.pct/100*13)?'fill':''}"></div>`).join("")}</div>
-          <div class="chlbl" style="margin:0 0 4px">Fatigue % by body part <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:700">0 fresh \u00b7 100 cooked</span></div>
-          ${fatigueRows}
-        </div>
-      </div>
-      <div class="dcol">
-        <div class="mgcard" style="padding:14px 16px 10px">
-          <div style="display:flex;align-items:baseline;margin-bottom:8px"><div class="lp-stats-k">CALENDAR</div>
-            <div style="margin-left:auto;font-size:12px;font-weight:800;color:var(--accent)">${MOS2[now2.getMonth()]} ${now2.getFullYear()}</div></div>
-          <div class="lcal" style="margin:0">
-            <div class="lcal-head">${["SU","MO","TU","WE","TH","FR","SA"].map((d3,i4)=>`<span class="${i4===now2.getDay()?"on":""}">${d3}</span>`).join("")}</div>
-            <div class="lcal-grid">${calCells}</div>
-            <div style="display:flex;gap:16px;justify-content:center;padding:7px 0 9px;font-size:9.5px;font-weight:800;color:var(--dim);letter-spacing:.05em">
-              <span><span style="color:#ff5c7a">\u25cf</span> LIFT</span>
-              <span><span style="color:#4c9aff">\u25cf</span> RUN</span>
-              <span><span style="color:var(--green)">\u25cf</span> FOOD</span>
+              ${fatRows || '<div style="font-size:12px;font-weight:700;color:var(--green);padding:6px 0">✓ every muscle is fresh — pick anything</div>'}
+              ${freshList.length?`<div style="font-size:10.5px;font-weight:700;color:var(--dim2);margin-top:8px;line-height:1.6">FRESH: ${freshList.join(" · ")}</div>`:""}
+              <div style="font-size:11px;font-weight:800;margin-top:10px;color:var(--dim)">${todayLog?"🏋️ today: <b style=\"color:var(--txt)\">"+esc(todayLog.workout)+"</b>":"🏋️ no lift today yet"}${todayRun?" · 🏃 "+(todayRun.time||"?")+" min":""}</div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="dfoods">
-      <div class="mgcard" style="padding:14px 16px;margin:0">
-        <div class="lp-stats-k" style="margin-bottom:8px">\ud83c\udf4e FOOD ANALYSIS</div>
-        ${foodAnalysisHtml()}
-      </div>
-      <div class="mgcard" style="padding:14px 16px;margin:0">
-        <div class="lp-stats-k" style="margin-bottom:8px">\ud83e\udd57 FOOD COACH</div>
-        ${foodCoachHtml()}
-      </div>
+
+      ${fuel?`<div class="bband"><div class="bhead">FUEL QUALITY — LAST ${a.n} DAYS</div>${fuel}</div>`:""}
     </div>`;
-    /* pure display: strip every click handler and pointer cue from the BODY.
-       The header (with the one Pull button) is assembled separately and left intact. */
-    const splitAt = html.indexOf('<div class="dgrid3">');
+    const splitAt = html.indexOf('<div class="board">');
     const head = html.slice(0, splitAt);
     const body = html.slice(splitAt).replace(/onclick="[^"]*"/g, "").replace(/cursor:pointer;?/g, "");
     el.innerHTML = head + body;
